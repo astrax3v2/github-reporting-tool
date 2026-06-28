@@ -1,0 +1,30 @@
+{
+  "name": "github-reporting-tool",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "bin": {
+    "vapt-report": "./index.js"
+  },
+  "scripts": {
+    "generate": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astrax3v2/github-reporting-tool.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/astrax3v2/github-reporting-tool/issues"
+  },
+  "homepage": "https://github.com/astrax3v2/github-reporting-tool#readme",
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "commander": "^15.0.0",
+    "docx": "^9.7.1"
+  }
+}

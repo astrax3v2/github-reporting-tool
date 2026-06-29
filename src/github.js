@@ -39,6 +39,7 @@ function parseVulnerability(issue, comments) {
     impact: extractSection(body, "Impact") || "",
     remediation: extractSection(body, "Remediation") || extractSection(body, "Recommendation") || "",
     poc: extractSection(body, "POC") || extractSection(body, "Proof of Concept") || extractSection(body, "Steps to Reproduce") || "",
+    images: extractImages(body),
     rawBody: body,
     comments: comments.map((c) => ({
       author: c.user.login,
@@ -77,6 +78,21 @@ function extractSection(body, heading) {
     if (match) return match[1].trim();
   }
   return "";
+}
+
+function extractImages(body) {
+  const images = [];
+  const mdPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  const htmlPattern = /<img[^>]+src=["']([^"']+)["'][^>]*>/g;
+  let match;
+  while ((match = mdPattern.exec(body)) !== null) {
+    images.push({ alt: match[1] || "Screenshot", url: match[2] });
+  }
+  while ((match = htmlPattern.exec(body)) !== null) {
+    const altMatch = match[0].match(/alt=["']([^"']*)["']/);
+    images.push({ alt: (altMatch && altMatch[1]) || "Screenshot", url: match[1] });
+  }
+  return images;
 }
 
 function capitalize(s) {

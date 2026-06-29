@@ -60,11 +60,11 @@ program
 
       console.log(`Parsed ${vulns.length} vulnerabilities. Generating report...`);
 
-      const outFile = await generateReport(vulns, { owner, repo: repoName }, outputPath);
+      const outFile = await generateReport(vulns, { owner, repo: repoName }, outputPath, token);
       console.log(`Report generated: ${path.resolve(outFile)}`);
     } catch (err) {
       console.error(`Error: ${err.message}`);
-      process.exit(1);
+      setTimeout(() => process.exit(1), 100);
     }
   });
 

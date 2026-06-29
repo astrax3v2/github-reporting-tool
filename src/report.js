@@ -6,6 +6,7 @@ const {
   TableRow,
   TableCell,
   TextRun,
+  ImageRun,
   WidthType,
   AlignmentType,
   BorderStyle,
@@ -18,6 +19,54 @@ const {
   NumberFormat,
 } = require("docx");
 const fs = require("fs");
+const https = require("https");
+const http = require("http");
+
+async function downloadImage(url, token, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith("https") ? https : http;
+    const headers = { "User-Agent": "github-vapt-report" };
+    if (token && url.includes("github.com")) {
+      headers["Authorization"] = `token ${token}`;
+      headers["Accept"] = "application/octet-stream";
+    }
+    client.get(url, { headers }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && maxRedirects > 0) {
+        return downloadImage(res.headers.location, token, maxRedirects - 1).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+      }
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
+function getImageDimensions(buffer) {
+  if (buffer[0] === 0x89 && buffer[1] === 0x50) {
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    return { width, height };
+  }
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
+    let offset = 2;
+    while (offset < buffer.length) {
+      if (buffer[offset] !== 0xFF) break;
+      const marker = buffer[offset + 1];
+      if (marker === 0xC0 || marker === 0xC2) {
+        const height = buffer.readUInt16BE(offset + 5);
+        const width = buffer.readUInt16BE(offset + 7);
+        return { width, height };
+      }
+      const len = buffer.readUInt16BE(offset + 2);
+      offset += 2 + len;
+    }
+  }
+  return { width: 600, height: 400 };
+}
 
 const SEVERITY_COLORS = {
   Critical: "8B0000",
@@ -127,6 +176,56 @@ function buildSummaryTable(vulns) {
   });
 }
 
+function pocCellWithImages(text, images, widthPct) {
+  const lines = (text || "N/A").split("\n").filter(Boolean);
+  const imgUrlPattern = /!\[[^\]]*\]\([^)]+\)|<img[^>]+>/g;
+  const children = lines.map((line) => {
+    const cleanLine = line.replace(imgUrlPattern, "").trim();
+    if (!cleanLine) return null;
+    return new Paragraph({
+      children: [new TextRun({ text: cleanLine.replace(/^[\s\-\d.]+/, "").trim() || cleanLine, size: 18, font: "Calibri" })],
+      bullet: line.match(/^[\s]*[-*\d]/) ? { level: 0 } : undefined,
+    });
+  }).filter(Boolean);
+
+  for (const img of images) {
+    if (img.data) {
+      const maxWidth = 500;
+      let w = img.dimensions.width;
+      let h = img.dimensions.height;
+      if (w > maxWidth) {
+        h = Math.round(h * (maxWidth / w));
+        w = maxWidth;
+      }
+      children.push(
+        new Paragraph({ spacing: { before: 100 } }),
+        new Paragraph({
+          children: [
+            new ImageRun({
+              data: img.data,
+              transformation: { width: w, height: h },
+              type: "png",
+            }),
+          ],
+        }),
+        new Paragraph({
+          children: [new TextRun({ text: img.alt || "Screenshot", italics: true, size: 16, color: "666666", font: "Calibri" })],
+        })
+      );
+    }
+  }
+
+  if (children.length === 0) {
+    children.push(new Paragraph({ children: [new TextRun({ text: "N/A", size: 18, font: "Calibri" })] }));
+  }
+
+  return new TableCell({
+    width: { size: widthPct, type: WidthType.PERCENTAGE },
+    borders: BORDER,
+    children,
+  });
+}
+
 function buildVulnDetailTable(vuln, index) {
   const sevColor = SEVERITY_COLORS[vuln.severity] || "000000";
   return new Table({
@@ -163,7 +262,12 @@ function buildVulnDetailTable(vuln, index) {
       labelValueRow("Analysis", vuln.analysis),
       labelValueRow("Impact", vuln.impact),
       labelValueRow("Remediation", vuln.remediation),
-      labelValueRow("Proof of Concept (POC)", vuln.poc),
+      new TableRow({
+        children: [
+          cell("Proof of Concept (POC)", 25, { bold: true, shading: { type: ShadingType.SOLID, color: "E8EAF6" } }),
+          pocCellWithImages(vuln.poc, vuln.images || [], 75),
+        ],
+      }),
       ...(vuln.comments.length > 0
         ? [
             labelValueRow(
@@ -210,9 +314,23 @@ function buildFindingsOverviewTable(vulns) {
   });
 }
 
-async function generateReport(vulns, meta, outputPath) {
+async function generateReport(vulns, meta, outputPath, token) {
   const sortOrder = { Critical: 0, High: 1, Medium: 2, Low: 3, Informational: 4 };
   vulns.sort((a, b) => (sortOrder[a.severity] ?? 5) - (sortOrder[b.severity] ?? 5));
+
+  for (const vuln of vulns) {
+    if (!vuln.images || vuln.images.length === 0) continue;
+    for (const img of vuln.images) {
+      try {
+        console.log(`  Downloading image: ${img.alt || img.url.slice(-40)}...`);
+        img.data = await downloadImage(img.url, token);
+        img.dimensions = getImageDimensions(img.data);
+      } catch (err) {
+        console.warn(`  Warning: Failed to download image ${img.url}: ${err.message}`);
+        img.data = null;
+      }
+    }
+  }
 
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
